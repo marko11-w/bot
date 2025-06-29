@@ -1,10 +1,9 @@
 from flask import Flask, request
 import telebot
-import os
 
-API_TOKEN = os.environ.get("API_TOKEN")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", 0))
-CHANNEL_USERNAME = os.environ.get("CHANNEL_USERNAME", "@MARK01i")
+API_TOKEN = "7837218696:AAGSozPdf3hLT0bBjrgB3uExeuir-90Rvok"
+ADMIN_ID = 7758666677
+CHANNEL_USERNAME = "@MARK01i"
 
 bot = telebot.TeleBot(API_TOKEN)
 app = Flask(__name__)
@@ -115,13 +114,15 @@ def handle_admin_action(call):
     message = call.message
     if action == "accept":
         caption = message.caption + "\n\n📌 لشراء الحساب تواصل مع البائع 👆"
-
-📌 لشراء الحساب تواصل مع البائع 👆"
         bot.send_photo(CHANNEL_USERNAME, message.photo[-1].file_id, caption=caption)
         bot.send_message(user_id, "✅ تم قبول عرض حسابك ونُشر في القناة!")
     else:
         bot.send_message(user_id, "❌ تم رفض عرض الحساب من قبل الإدارة.")
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+
+from flask import Flask, request
+
+app = Flask(__name__)
 
 @app.route('/', methods=['POST'])
 def webhook():
