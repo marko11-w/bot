@@ -114,7 +114,7 @@ def handle_admin_action(call):
     action, user_id = parts[0], int(parts[1])
     message = call.message
     if action == "accept":
-        caption = message.caption + "
+        caption = message.caption + "\n\n📌 لشراء الحساب تواصل مع البائع 👆"
 
 📌 لشراء الحساب تواصل مع البائع 👆"
         bot.send_photo(CHANNEL_USERNAME, message.photo[-1].file_id, caption=caption)
