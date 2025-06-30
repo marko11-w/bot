@@ -10,11 +10,11 @@ CHANNEL_USERNAME = "@MARK01i"
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN)
 
-def load_json(path, default): 
+def load_json(path, default):
     try: return json.load(open(path, "r", encoding="utf-8"))
     except: return default
 
-def save_json(path, data): 
+def save_json(path, data):
     json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
 settings = load_json("settings.json", {
@@ -35,7 +35,8 @@ def is_subscribed(user_id):
         return status in ["member", "administrator", "creator"]
     except:
         return False
-        @bot.message_handler(commands=["start"])
+
+@bot.message_handler(commands=["start"])
 def start(message):
     user_id = message.from_user.id
     if not settings["bot_active"] and user_id != ADMIN_ID:
@@ -85,12 +86,13 @@ def handle_price(message):
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("✅ إرسال الطلب", callback_data="confirm_submit"))
     bot.send_message(user_id, "هل تريد إرسال الطلب؟", reply_markup=markup)
-    @bot.callback_query_handler(func=lambda call: call.data == "confirm_submit")
+
+@bot.callback_query_handler(func=lambda call: call.data == "confirm_submit")
 def submit_request(call):
     user_id = call.from_user.id
     state = user_states.get(user_id, {})
     if not state: return
-    caption = f"📤 طلب جديد\n🎮 {state['game']}\n📝 {state['desc']}\n💵 {state['price']}$\n👤 @{call.from_user.username or 'لا يوجد'}\n🆔 {user_id}"
+    caption = f"📤 طلب جديد\\n🎮 {state['game']}\\n📝 {state['desc']}\\n💵 {state['price']}$\\n👤 @{call.from_user.username or 'لا يوجد'}\\n🆔 {user_id}"
     markup = types.InlineKeyboardMarkup()
     markup.row(
         types.InlineKeyboardButton("✅ قبول", callback_data=f"accept_{user_id}"),
@@ -103,91 +105,7 @@ def submit_request(call):
     bot.send_message(user_id, "📬 تم إرسال الطلب.")
     user_states.pop(user_id)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("accept_") or call.data.startswith("reject_"))
-def process_request(call):
-    uid = call.data.split("_")[1]
-    data = pending.get(uid)
-    if not data: return
-    if call.data.startswith("accept_"):
-        caption = f"🔥 حساب جديد للبيع!\n🎮 {data['game']}\n📝 {data['desc']}\n💵 {data['price']}$\n📩 تواصل مع: @{call.from_user.username or 'لا يوجد'}"
-        bot.send_photo(CHANNEL_USERNAME, data["photo"], caption=caption)
-        bot.send_message(int(uid), "✅ تم نشر حسابك.")
-    else:
-        bot.send_message(int(uid), "❌ تم رفض طلبك.")
-    del pending[uid]
-    save_json("pending_requests.json", pending)
-    bot.delete_message(call.message.chat.id, call.message.message_id)
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("edit_"))
-def start_edit(call):
-    uid = call.data.split("_")[1]
-    if uid not in pending: return
-    user_states[call.from_user.id] = {"edit_user": uid, "step": "choose_edit"}
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("✏️ تعديل الوصف", "💰 تعديل السعر")
-    markup.row("🖼️ تعديل الصورة", "❌ إلغاء")
-    bot.send_message(call.message.chat.id, "🔧 اختر ما تريد تعديله:", reply_markup=markup)
-
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "choose_edit")
-def handle_edit_choice(message):
-    uid = user_states[message.from_user.id]["edit_user"]
-    if message.text == "✏️ تعديل الوصف":
-        bot.send_message(message.chat.id, "✏️ أرسل الوصف الجديد:")
-        user_states[message.from_user.id]["step"] = "new_desc"
-    elif message.text == "💰 تعديل السعر":
-        bot.send_message(message.chat.id, "💰 أرسل السعر الجديد:")
-        user_states[message.from_user.id]["step"] = "new_price"
-    elif message.text == "🖼️ تعديل الصورة":
-        bot.send_message(message.chat.id, "📸 أرسل الصورة الجديدة:")
-        user_states[message.from_user.id]["step"] = "new_photo"
-    else:
-        user_states.pop(message.from_user.id)
-        bot.send_message(message.chat.id, "❌ تم الإلغاء.")
-        @bot.message_handler(content_types=["text", "photo"])
-def handle_admin_updates(message):
-    uid = user_states.get(message.from_user.id, {}).get("edit_user")
-    step = user_states.get(message.from_user.id, {}).get("step")
-    if not uid or uid not in pending: return
-
-    if step == "new_desc":
-        pending[uid]["desc"] = message.text
-    elif step == "new_price":
-        try:
-            pending[uid]["price"] = float(message.text)
-        except:
-            return bot.send_message(message.chat.id, "❌ أدخل رقمًا صحيحًا.")
-    elif step == "new_photo" and message.content_type == "photo":
-        pending[uid]["photo"] = message.photo[-1].file_id
-    else:
-        return
-
-    save_json("pending_requests.json", pending)
-    bot.send_message(message.chat.id, "✅ تم التعديل.")
-    user_states.pop(message.from_user.id)
-
-@bot.message_handler(commands=["admin"])
-def admin_panel(message):
-    if message.from_user.id != ADMIN_ID: return
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("📋 الألعاب", "✏️ الرسائل")
-    markup.row("🚫 حظر", "✅ رفع الحظر")
-    markup.row("🟢 تشغيل البوت", "🔴 إيقاف البوت")
-    markup.row("📥 عرض الطلبات المعلقة", "📣 إرسال جماعي")
-    bot.send_message(message.chat.id, "🛠️ لوحة تحكم الأدمن:", reply_markup=markup)
-
-@bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and m.text == "📥 عرض الطلبات المعلقة")
-def show_pending(message):
-    if not pending:
-        return bot.send_message(message.chat.id, "📭 لا توجد طلبات معلقة حالياً.")
-    for uid, data in pending.items():
-        caption = f"📌 طلب من المستخدم {uid}\n🎮 {data['game']}\n📝 {data['desc']}\n💵 {data['price']}$"
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton("✅ قبول", callback_data=f"accept_{uid}"),
-            types.InlineKeyboardButton("❌ رفض", callback_data=f"reject_{uid}")
-        )
-        markup.add(types.InlineKeyboardButton("✏️ تعديل", callback_data=f"edit_{uid}"))
-        bot.send_photo(message.chat.id, data['photo'], caption=caption, reply_markup=markup)
-        @app.route("/", methods=["GET"])
+@app.route("/", methods=["GET"])
 def index():
     return "Bot is running", 200
 
@@ -199,4 +117,3 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-    
