@@ -1,208 +1,186 @@
-import os, json
+import os
+import json
 from flask import Flask, request
 import telebot
 from telebot import types
 
-TOKEN = "7837218696:AAGSozPdf3hLT0bBjrgB3uExeuir-90Rvok"
-ADMIN_ID = 7758666677
+# إعدادات
+TOKEN = os.environ.get("7837218696:AAGSozPdf3hLT0bBjrgB3uExeuir-90Rvok") or "ضع_توكن_البوت"
+ADMIN_ID = 7758666677  # آيدي الأدمن
 CHANNEL_USERNAME = "@MARK01i"
 
-app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
-def load_json(path, default):
-    try: return json.load(open(path, "r", encoding="utf-8"))
-    except: return default
+# ملفات التخزين
+FILES = {
+    "settings": "settings.json",
+    "banned": "banned_users.json",
+    "pending": "pending_requests.json"
+}
 
-def save_json(path, data):
-    json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-
-settings = load_json("settings.json", {
-    "games": ["🎮 ببجي", "🔥 فري فاير", "⚽ بيس", "🎯 أخرى"],
-    "bot_active": True,
-    "messages": {
-        "start": "👋 أهلاً بك في بوت بيع وتبادل الحسابات.",
-        "must_subscribe": "🚫 يجب الاشتراك في القناة أولًا: @MARK01i"
-    }
-})
-banned_users = load_json("banned_users.json", [])
-pending = load_json("pending_requests.json", {})
-user_states = {}
-
-def is_subscribed(user_id):
+# تحميل أو حفظ بيانات JSON
+def load_json(name):
     try:
-        status = bot.get_chat_member(CHANNEL_USERNAME, user_id).status
-        return status in ["member", "administrator", "creator"]
+        with open(FILES[name], "r", encoding="utf-8") as f:
+            return json.load(f)
     except:
-        return False
+        return {} if name == "pending" else []
 
+def save_json(name, data):
+    with open(FILES[name], "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+# إعدادات افتراضية
+if not os.path.exists(FILES["settings"]):
+    save_json("settings", {
+        "bot_active": True,
+        "games": ["🎮 ببجي", "🔥 فري فاير", "⚽ بيس", "🎯 أخرى"],
+        "messages": {
+            "start": "👋 أهلاً بك في بوت بيع وتبادل الحسابات.\nأرسل صورة الحساب لبدء العملية.",
+            "must_subscribe": f"🚫 يجب الاشتراك في القناة أولًا: {CHANNEL_USERNAME}"
+        }
+    })
+
+# التحقق من الحظر
+def is_banned(user_id):
+    banned = load_json("banned")
+    return user_id in banned
+
+# نقطة تشغيل البوت
+@app.route('/', methods=["GET", "POST"])
+def webhook():
+    if request.method == "POST":
+        update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
+        bot.process_new_updates([update])
+        return "ok"
+    return "Bot running."
+
+# /start
 @bot.message_handler(commands=["start"])
 def start(message):
     user_id = message.from_user.id
-    if not settings["bot_active"] and user_id != ADMIN_ID:
-        return bot.send_message(user_id, "🚫 البوت متوقف مؤقتًا.")
-    if user_id in banned_users:
-        return bot.send_message(user_id, "🚫 تم حظرك.")
-    if not is_subscribed(user_id):
-        return bot.send_message(user_id, settings["messages"]["must_subscribe"])
+    if is_banned(user_id):
+        return bot.reply_to(message, "🚫 تم حظرك من استخدام هذا البوت.")
+    
+    settings = load_json("settings")
+    if not settings.get("bot_active", True):
+        return bot.reply_to(message, "🔒 البوت متوقف مؤقتًا من قبل الإدارة.")
+    
     bot.send_message(user_id, settings["messages"]["start"])
-    bot.send_message(user_id, "📸 أرسل صورة الحساب.")
-    user_states[user_id] = {"step": "photo"}
+    bot.send_message(user_id, "📸 الرجاء إرسال صورة الحساب للبيع أو التبادل.")
+    bot.register_next_step_handler(message, receive_image)
 
-@bot.message_handler(content_types=["photo"])
-def handle_photo(message):
-    user_id = message.from_user.id
-    if user_states.get(user_id, {}).get("step") != "photo": return
-    user_states[user_id]["photo"] = message.photo[-1].file_id
-    user_states[user_id]["step"] = "desc"
-    bot.send_message(user_id, "📝 اكتب وصف الحساب:")
+# استقبال صورة الحساب
+def receive_image(message):
+    if not message.photo:
+        return bot.reply_to(message, "📸 أرسل صورة وليس نصاً.")
+    
+    file_id = message.photo[-1].file_id
+    pending = load_json("pending")
+    user_id = str(message.from_user.id)
+    pending[user_id] = {"photo": file_id}
+    save_json("pending", pending)
+    
+    bot.send_message(message.chat.id, "📝 الآن أرسل وصف الحساب.")
+    bot.register_next_step_handler(message, receive_description)
 
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "desc")
-def handle_desc(message):
-    user_id = message.from_user.id
-    user_states[user_id]["desc"] = message.text
-    user_states[user_id]["step"] = "game"
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    for g in settings["games"]: markup.add(g)
-    bot.send_message(user_id, "🎮 اختر نوع اللعبة:", reply_markup=markup)
-
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "game")
-def handle_game(message):
-    user_id = message.from_user.id
-    game = message.text
-    if game not in settings["games"]:
-        return bot.send_message(user_id, "❌ اختر لعبة من القائمة.")
-    user_states[user_id]["game"] = game
-    user_states[user_id]["step"] = "price"
-    bot.send_message(user_id, "💰 أدخل السعر بالدولار:")
-
-@bot.message_handler(commands=["admin"])
-def admin_panel(message):
-    if message.from_user.id != ADMIN_ID:
+# استقبال الوصف
+def receive_description(message):
+    pending = load_json("pending")
+    user_id = str(message.from_user.id)
+    if user_id not in pending:
         return
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("📥 الطلبات المعلقة", callback_data="admin_pending"),
-        types.InlineKeyboardButton("📋 الألعاب", callback_data="admin_games"),
-        types.InlineKeyboardButton("✏️ الرسائل", callback_data="admin_msgs"),
-        types.InlineKeyboardButton("🚫 حظر", callback_data="admin_ban"),
-        types.InlineKeyboardButton("✅ رفع الحظر", callback_data="admin_unban"),
-        types.InlineKeyboardButton("🔴 إيقاف البوت", callback_data="admin_stop"),
-        types.InlineKeyboardButton("🟢 تشغيل البوت", callback_data="admin_start"),
-    )
-    bot.send_message(message.chat.id, "🔧 لوحة التحكم:\nاختر العملية التي ترغب بإدارتها 👇", reply_markup=markup)
+    
+    pending[user_id]["description"] = message.text
+    save_json("pending", pending)
 
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "price")
-def handle_price(message):
-    user_id = message.from_user.id
-    try: price = float(message.text)
-    except: return bot.send_message(user_id, "❌ أدخل رقمًا صحيحًا.")
-    user_states[user_id]["price"] = price
-    user_states[user_id]["step"] = "confirm"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("✅ إرسال الطلب", callback_data="confirm_submit"))
-    bot.send_message(user_id, "هل تريد إرسال الطلب؟", reply_markup=markup)
+    # قائمة الألعاب
+    settings = load_json("settings")
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for game in settings["games"]:
+        markup.add(game)
+    bot.send_message(message.chat.id, "🎮 اختر نوع اللعبة:", reply_markup=markup)
+    bot.register_next_step_handler(message, receive_game)
 
-@bot.callback_query_handler(func=lambda call: call.data == "confirm_submit")
-def submit_request(call):
-    user_id = call.from_user.id
-    state = user_states.get(user_id, {})
-    if not state: return
-    caption = f"📤 طلب جديد\\n🎮 {state['game']}\\n📝 {state['desc']}\\n💵 {state['price']}$\\n👤 @{call.from_user.username or 'لا يوجد'}\\n🆔 {user_id}"
-    markup = types.InlineKeyboardMarkup()
-    markup.row(
+# استقبال نوع اللعبة
+def receive_game(message):
+    pending = load_json("pending")
+    user_id = str(message.from_user.id)
+    pending[user_id]["game"] = message.text
+    save_json("pending", pending)
+
+    bot.send_message(message.chat.id, "💵 اكتب السعر بالدولار ($):", reply_markup=types.ReplyKeyboardRemove())
+    bot.register_next_step_handler(message, receive_price)
+
+# استقبال السعر
+def receive_price(message):
+    pending = load_json("pending")
+    user_id = str(message.from_user.id)
+    if user_id not in pending:
+        return
+    
+    try:
+        price = float(message.text)
+        pending[user_id]["price"] = f"${price}"
+    except:
+        return bot.reply_to(message, "❌ يرجى إدخال رقم فقط.")
+    
+    save_json("pending", pending)
+
+    bot.send_message(message.chat.id, "✅ تم استلام طلبك وسيتم مراجعته من الإدارة قريبًا.")
+
+    # إرسال إلى الأدمن
+    data = pending[user_id]
+    caption = f"📌 طلب جديد من: @{message.from_user.username or 'بدون اسم'}\n\n" \
+              f"🎮 اللعبة: {data['game']}\n" \
+              f"💬 الوصف: {data['description']}\n" \
+              f"💵 السعر: {data['price']}\n" \
+              f"🆔 ID: {user_id}"
+
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(
         types.InlineKeyboardButton("✅ قبول", callback_data=f"accept_{user_id}"),
         types.InlineKeyboardButton("❌ رفض", callback_data=f"reject_{user_id}")
     )
-    markup.add(types.InlineKeyboardButton("✏️ تعديل", callback_data=f"edit_{user_id}"))
-    msg = bot.send_photo(ADMIN_ID, state["photo"], caption=caption, reply_markup=markup)
-    pending[str(user_id)] = {**state, "msg_id": msg.message_id}
-    save_json("pending_requests.json", pending)
-    bot.send_message(user_id, "📬 تم إرسال الطلب.")
-    user_states.pop(user_id)
+    bot.send_photo(ADMIN_ID, data["photo"], caption=caption, reply_markup=keyboard)
 
+# زر القبول/الرفض
+@bot.callback_query_handler(func=lambda c: c.data.startswith("accept_") or c.data.startswith("reject_"))
+def handle_decision(call):
+    action, user_id = call.data.split("_")
+    pending = load_json("pending")
+
+    if user_id not in pending:
+        return bot.answer_callback_query(call.id, "❌ الطلب غير موجود.")
+    
+    data = pending[user_id]
+    if action == "accept":
+        # النشر في القناة
+        caption = f"🎮 {data['game']}\n💬 {data['description']}\n💵 السعر: {data['price']}\n👤 للتواصل: @{user_id}"
+        bot.send_photo(CHANNEL_USERNAME, data["photo"], caption=caption)
+        bot.send_message(user_id, "✅ تم قبول طلبك ونشره في القناة.")
+    else:
+        bot.send_message(user_id, "❌ تم رفض طلبك من قبل الإدارة.")
+    
+    del pending[user_id]
+    save_json("pending", pending)
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+
+# أوامر إدارية: /admin
 @bot.message_handler(commands=["admin"])
 def admin_panel(message):
-    @bot.callback_query_handler(func=lambda call: call.data == "admin_games")
-def edit_games(call):
-    if call.from_user.id != ADMIN_ID:
-        return
-    bot.send_message(call.message.chat.id, "📝 أرسل قائمة الألعاب الجديدة، كل لعبة في سطر.")
-    user_states[call.from_user.id] = {"step": "edit_games"}
-
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "edit_games")
-def save_games(message):
-    @bot.callback_query_handler(func=lambda call: call.data == "admin_msgs")
-def edit_messages(call):
-    if call.from_user.id != ADMIN_ID:
-        return
-    keys = list(settings["messages"].keys())
-    txt = "✏️ الرسائل القابلة للتعديل:\n"
-    txt += "\n".join([f"- {k}" for k in keys])
-    txt += "\n\n📥 أرسل اسم الرسالة (مثل: start) يليها النص الجديد، مفصول بـ | هكذا:\n\nمثال:\nstart|مرحبًا بك!"
-    user_states[call.from_user.id] = {"step": "edit_message"}
-    bot.send_message(call.message.chat.id, txt)
-
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "edit_message")
-def save_message(message):
-    @bot.callback_query_handler(func=lambda call: call.data == "admin_pending")
-def show_pending_requests(call):
-    if call.from_user.id != ADMIN_ID:
-        return
-    if not pending:
-        return bot.send_message(call.message.chat.id, "📭 لا توجد طلبات معلقة.")
-    
-    for user_id, data in pending.items():
-        try:
-            caption = f"🎮 {data['game']}\n📝 {data['desc']}\n💵 {data['price']}$\n👤 @{data.get('username', 'لا يوجد')}\n🆔 {user_id}"
-            markup = types.InlineKeyboardMarkup()
-            markup.row(
-                types.InlineKeyboardButton("✅ قبول", callback_data=f"accept_{user_id}"),
-                types.InlineKeyboardButton("❌ رفض", callback_data=f"reject_{user_id}")
-            )
-            markup.add(types.InlineKeyboardButton("✏️ تعديل", callback_data=f"edit_{user_id}"))
-            bot.send_photo(call.message.chat.id, data["photo"], caption=caption, reply_markup=markup)
-        except Exception as e:
-            print(f"خطأ في عرض طلب {user_id}: {e}")
-    try:
-        key, val = message.text.split("|", 1)
-        key = key.strip()
-        if key not in settings["messages"]:
-            return bot.send_message(message.chat.id, "❌ المفتاح غير موجود.")
-        settings["messages"][key] = val.strip()
-        save_json("settings.json", settings)
-        bot.send_message(message.chat.id, f"✅ تم تحديث رسالة: {key}")
-    except:
-        bot.send_message(message.chat.id, "❌ تنسيق غير صحيح. استخدم المفتاح | الرسالة.")
-    user_states.pop(message.from_user.id)
-    games_list = message.text.strip().split('\n')
-    settings["games"] = games_list
-    save_json("settings.json", settings)
-    bot.send_message(message.chat.id, "✅ تم تحديث قائمة الألعاب.")
-    user_states.pop(message.from_user.id)
     if message.from_user.id != ADMIN_ID:
         return
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("📥 الطلبات المعلقة", callback_data="admin_pending"),
-        types.InlineKeyboardButton("📋 الألعاب", callback_data="admin_games"),
-        types.InlineKeyboardButton("✏️ الرسائل", callback_data="admin_msgs"),
-        types.InlineKeyboardButton("🚫 حظر", callback_data="admin_ban"),
-        types.InlineKeyboardButton("✅ رفع الحظر", callback_data="admin_unban"),
-        types.InlineKeyboardButton("🔴 إيقاف البوت", callback_data="admin_stop"),
-        types.InlineKeyboardButton("🟢 تشغيل البوت", callback_data="admin_start"),
-    )
-    bot.send_message(message.chat.id, "🔧 لوحة التحكم:\nاختر العملية التي ترغب بإدارتها 👇", reply_markup=markup)
+    
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("🔧 إيقاف البوت", "▶️ تشغيل البوت")
+    markup.add("📋 عرض الألعاب", "➕ إضافة لعبة", "🗑️ حذف لعبة")
+    markup.add("🚫 حظر مستخدم", "🔓 رفع الحظر")
+    bot.send_message(message.chat.id, "👮 لوحة تحكم الأدمن:", reply_markup=markup)
 
-@app.route("/", methods=["GET"])
-def index():
-    return "Bot is running", 200
+# (المزيد من الأوامر يمكن إضافتها حسب طلبك...)
 
-@app.route("/", methods=["POST"])
-def webhook():
-    update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
-    bot.process_new_updates([update])
-    return "ok", 200
-
+# بدء Flask
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
