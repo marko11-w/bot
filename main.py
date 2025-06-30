@@ -1,230 +1,163 @@
 import os
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
-from flask import Flask, request
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 import os
 
 TOKEN = "7837218696:AAGSozPdf3hLT0bBjrgB3uExeuir-90Rvok"
-ADMIN_ID = 7758666677
-CHANNEL_USERNAME = "@MARK01i"
+ADMIN_ID = 7758666677  # عدلها إلى أيديك
 
 bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
 
-# لتخزين بيانات المستخدمين أثناء الإدخال (حالة كل مستخدم)
+# حالة المستخدم (للمتابعة في أي خطوة تعديل أو إدخال)
 user_states = {}
+# بيانات المستخدمين المؤقتة
 user_data = {}
 
-# مراحل الإدخال
-STATE_WAIT_PHOTO = 1
-STATE_WAIT_DESCRIPTION = 2
-STATE_WAIT_PRICE = 3
-STATE_WAIT_TYPE = 4
-
-# وظائف لإنشاء أزرار تعديل للإدمن
-def admin_edit_buttons(user_id):
+# دالة لإرسال رسالة مع أزرار للإدمن لتعديل بيانات الحساب
+def send_for_admin(user_id):
+    data = user_data.get(user_id)
+    if not data:
+        return
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
+        InlineKeyboardButton("تعديل الصورة", callback_data=f"edit_photo_{user_id}"),
         InlineKeyboardButton("تعديل الوصف", callback_data=f"edit_desc_{user_id}"),
         InlineKeyboardButton("تعديل السعر", callback_data=f"edit_price_{user_id}"),
-        InlineKeyboardButton("تعديل نوع الحساب", callback_data=f"edit_type_{user_id}"),
-        InlineKeyboardButton("تعديل الصورة", callback_data=f"edit_photo_{user_id}"),
-        InlineKeyboardButton("نشر الإعلان", callback_data=f"publish_{user_id}"),
-        InlineKeyboardButton("رفض الإعلان", callback_data=f"reject_{user_id}"),
+        InlineKeyboardButton("تعديل اليوزر", callback_data=f"edit_user_{user_id}")
     )
-    return markup
+    caption = f"""عرض حساب للشراء:
 
-# بدء المحادثة
+مستخدم: {data.get('user')}
+نوع الحساب: {data.get('type')}
+السعر: {data.get('price')} دولار
+الوصف:
+{data.get('description')}
+"""
+    # إرسال الصورة مع الكابتشن
+    bot.send_photo(ADMIN_ID, data['photo_file_id'], caption=caption, reply_markup=markup)
+
+# بداية التعامل مع المستخدم
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        bot.send_message(user_id, "مرحباً أيها الإدمن.")
-        return
-
-    bot.send_message(user_id, "أرسل صورة الحساب للبيع:")
-    user_states[user_id] = STATE_WAIT_PHOTO
-    user_data[user_id] = {}
+    user_states[user_id] = "waiting_photo"
+    user_data[user_id] = {"user": f"@{message.from_user.username}" if message.from_user.username else str(user_id)}
+    bot.send_message(user_id, "أرسل صورة حساب اللعبة التي تريد بيعها:")
 
 # استقبال الصورة
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     user_id = message.from_user.id
-    if user_states.get(user_id) == STATE_WAIT_PHOTO:
+    if user_states.get(user_id) == "waiting_photo":
         file_id = message.photo[-1].file_id
-        user_data[user_id]['photo'] = file_id
-        bot.send_message(user_id, "أرسل وصف الحساب:")
-        user_states[user_id] = STATE_WAIT_DESCRIPTION
-    elif user_states.get(user_id) == 'editing_photo':
-        user_data[user_id]['photo'] = message.photo[-1].file_id
-        bot.send_message(user_id, "تم تحديث الصورة بنجاح.")
+        user_data[user_id]['photo_file_id'] = file_id
+        user_states[user_id] = "waiting_type"
+        bot.send_message(user_id, "أرسل نوع الحساب (مثلاً: ببجي، فري فاير، بيس، إلخ):")
+    elif user_states.get(user_id) and user_states[user_id].startswith("editing_photo_"):
+        target_id = int(user_states[user_id].split("_")[2])
+        user_data[target_id]['photo_file_id'] = message.photo[-1].file_id
+        bot.send_message(ADMIN_ID, "تم تحديث الصورة.")
+        send_for_admin(target_id)
         user_states[user_id] = None
-        # إعادة إرسال البيانات للإدمن بعد التعديل
-        send_for_admin(user_id)
-    else:
-        bot.send_message(user_id, "يرجى اتباع الخطوات.")
-
-# استقبال الوصف
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == STATE_WAIT_DESCRIPTION)
-def handle_description(message):
-    user_id = message.from_user.id
-    user_data[user_id]['description'] = message.text
-    bot.send_message(user_id, "أرسل سعر الحساب (بالدولار):")
-    user_states[user_id] = STATE_WAIT_PRICE
-
-# استقبال السعر
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == STATE_WAIT_PRICE)
-def handle_price(message):
-    user_id = message.from_user.id
-    price_text = message.text
-    # تحقق أن السعر رقم
-    try:
-        price = float(price_text)
-        user_data[user_id]['price'] = price
-        bot.send_message(user_id, "أرسل نوع الحساب (مثل ببجي، بيس، فري فاير):")
-        user_states[user_id] = STATE_WAIT_TYPE
-    except ValueError:
-        bot.send_message(user_id, "الرجاء إدخال سعر صحيح (رقم).")
 
 # استقبال نوع الحساب
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == STATE_WAIT_TYPE)
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "waiting_type")
 def handle_type(message):
     user_id = message.from_user.id
     user_data[user_id]['type'] = message.text
+    user_states[user_id] = "waiting_desc"
+    bot.send_message(user_id, "أرسل وصف الحساب:")
 
-    # أرسل للإدمن للمراجعة
+# استقبال الوصف
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "waiting_desc")
+def handle_desc(message):
+    user_id = message.from_user.id
+    user_data[user_id]['description'] = message.text
+    user_states[user_id] = "waiting_price"
+    bot.send_message(user_id, "أرسل سعر الحساب (بالدولار):")
+
+# استقبال السعر
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "waiting_price")
+def handle_price(message):
+    user_id = message.from_user.id
+    text = message.text
+    if not text.replace('.', '', 1).isdigit():
+        bot.send_message(user_id, "من فضلك ارسل سعر صالح (رقم فقط).")
+        return
+    user_data[user_id]['price'] = text
+    user_states[user_id] = None
+    bot.send_message(user_id, "تم استلام بيانات حسابك. سيتم مراجعتها من قبل الإدارة.")
+
+    # ارسال للادمن
     send_for_admin(user_id)
 
-    bot.send_message(user_id, "تم إرسال عرضك إلى الإدارة للمراجعة. شكراً لك!")
-    user_states[user_id] = None
-
-# دالة لإرسال البيانات للإدمن
-def send_for_admin(user_id):
-    data = user_data.get(user_id)
-    if not data:
-        return
-    caption = f"""عرض بيع حساب من المستخدم: @{bot.get_chat(user_id).username or user_id}
-نوع الحساب: {data.get('type')}
-السعر: {data.get('price')} دولار
-الوصف: {data.get('description')}"""
-
-    bot.send_photo(ADMIN_ID, data['photo'], caption=caption, reply_markup=admin_edit_buttons(user_id))
-
-# التعامل مع أزرار تعديل الأدمن
+# التعامل مع أزرار الإدارة
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     data = call.data
-    user_id = call.from_user.id
-
-    if user_id != ADMIN_ID:
-        bot.answer_callback_query(call.id, "أنت غير مخوّل لاستخدام هذه الأزرار.")
+    admin_id = call.from_user.id
+    if admin_id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "ليس لديك صلاحية.")
         return
 
-    if data.startswith("edit_desc_"):
-        target_id = int(data.split("_")[2])
-        bot.send_message(ADMIN_ID, f"أرسل الوصف الجديد للمستخدم {target_id}:")
-        user_states[ADMIN_ID] = f"editing_desc_{target_id}"
+    if data.startswith("edit_"):
+        parts = data.split("_")
+        field = parts[1]  # photo, desc, price, user
+        target_id = int(parts[2])
+        user_states[admin_id] = f"editing_{field}_{target_id}"
         bot.answer_callback_query(call.id)
+        bot.send_message(admin_id, f"أرسل {field} الجديد:")
 
-    elif data.startswith("edit_price_"):
-        target_id = int(data.split("_")[2])
-        bot.send_message(ADMIN_ID, f"أرسل السعر الجديد للمستخدم {target_id}:")
-        user_states[ADMIN_ID] = f"editing_price_{target_id}"
-        bot.answer_callback_query(call.id)
-
-    elif data.startswith("edit_type_"):
-        target_id = int(data.split("_")[2])
-        bot.send_message(ADMIN_ID, f"أرسل نوع الحساب الجديد للمستخدم {target_id}:")
-        user_states[ADMIN_ID] = f"editing_type_{target_id}"
-        bot.answer_callback_query(call.id)
-
-    elif data.startswith("edit_photo_"):
-        target_id = int(data.split("_")[2])
-        bot.send_message(ADMIN_ID, f"أرسل الصورة الجديدة للمستخدم {target_id}:")
-        user_states[ADMIN_ID] = f"editing_photo_{target_id}"
-        bot.answer_callback_query(call.id)
-
-    elif data.startswith("publish_"):
-        target_id = int(data.split("_")[1])
-        publish_ad(target_id)
-        bot.answer_callback_query(call.id, "تم نشر الإعلان في القناة.")
-
-    elif data.startswith("reject_"):
-        target_id = int(data.split("_")[1])
-        bot.send_message(target_id, "تم رفض عرضك من قبل الإدارة.")
-        bot.answer_callback_query(call.id, "تم رفض الإعلان.")
-        # حذف البيانات المؤقتة
-        if target_id in user_data:
-            del user_data[target_id]
-
-# استقبال ردود الادمن على تعديل البيانات
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, "").startswith("editing_"))
+# استقبال ردود تعديل الادمن
+@bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and user_states.get(m.from_user.id) and user_states[m.from_user.id].startswith("editing_"))
 def handle_admin_edit(message):
-    state = user_states[message.from_user.id]
+    admin_id = message.from_user.id
+    state = user_states.get(admin_id)
     if not state:
         return
     parts = state.split("_")
-    field = parts[1]  # desc, price, type, photo
+    field = parts[1]
     target_id = int(parts[2])
-    
-    if field == "desc":
+
+    if field == "photo":
+        if message.content_type != 'photo':
+            bot.send_message(admin_id, "الرجاء إرسال صورة فقط.")
+            return
+        user_data[target_id]['photo_file_id'] = message.photo[-1].file_id
+        bot.send_message(admin_id, "تم تحديث الصورة.")
+    elif field == "desc":
         user_data[target_id]['description'] = message.text
-        bot.send_message(ADMIN_ID, "تم تحديث الوصف.")
-        send_for_admin(target_id)
-        user_states[message.from_user.id] = None
-
+        bot.send_message(admin_id, "تم تحديث الوصف.")
     elif field == "price":
-        try:
-            price = float(message.text)
-            user_data[target_id]['price'] = price
-            bot.send_message(ADMIN_ID, "تم تحديث السعر.")
-            send_for_admin(target_id)
-            user_states[message.from_user.id] = None
-        except ValueError:
-            bot.send_message(ADMIN_ID, "الرجاء إدخال سعر صحيح (رقم).")
+        text = message.text
+        if not text.replace('.', '', 1).isdigit():
+            bot.send_message(admin_id, "من فضلك ارسل سعر صالح (رقم فقط).")
+            return
+        user_data[target_id]['price'] = text
+        bot.send_message(admin_id, "تم تحديث السعر.")
+    elif field == "user":
+        user_data[target_id]['user'] = message.text
+        bot.send_message(admin_id, "تم تحديث اليوزر.")
 
-    elif field == "type":
-        user_data[target_id]['type'] = message.text
-        bot.send_message(ADMIN_ID, "تم تحديث نوع الحساب.")
-        send_for_admin(target_id)
-        user_states[message.from_user.id] = None
+    user_states[admin_id] = None
+    send_for_admin(target_id)
 
-    elif field == "photo":
-        bot.send_message(ADMIN_ID, "يرجى إرسال صورة جديدة وليس نصاً.")
-
-# دالة النشر في القناة
-def publish_ad(user_id):
-    data = user_data.get(user_id)
-    if not data:
-        bot.send_message(ADMIN_ID, "لا توجد بيانات لنشرها.")
-        return
-    caption = f"""نوع الحساب: {data.get('type')}
-السعر: {data.get('price')} دولار
-الوصف: {data.get('description')}"""
-    bot.send_photo(CHANNEL_USERNAME, data['photo'], caption=caption)
-    bot.send_message(user_id, "تم نشر إعلانك في القناة.")
-    # حذف البيانات بعد النشر
-    del user_data[user_id]
-
-# --- استقبال تحديثات الويب هوك ---
-@app.route("/", methods=["POST"])
-def webhook():
-    json_string = request.get_data().decode("utf-8")
-    update = telebot.types.Update.de_json(json_string)
-    bot.process_new_updates([update])
-    return "", 200
-
-# ضبط الويب هوك
-def set_webhook():
-    url = os.environ.get("WEBHOOK_URL")
-    if url:
-        bot.remove_webhook()
-        bot.set_webhook(url=url)
-    else:
-        print("لم يتم تحديد WEBHOOK_URL")
 
 if __name__ == "__main__":
-    set_webhook()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    import os
+    from flask import Flask, request
+
+    app = Flask(__name__)
+
+    @app.route('/', methods=['POST'])
+    def webhook():
+        json_str = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_str)
+        bot.process_new_updates([update])
+        return "!", 200
+
+    PORT = int(os.environ.get('PORT', 5000))
+    app.run(host="0.0.0.0", port=PORT)
+
 
 
