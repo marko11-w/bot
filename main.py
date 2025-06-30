@@ -76,6 +76,22 @@ def handle_game(message):
     user_states[user_id]["step"] = "price"
     bot.send_message(user_id, "💰 أدخل السعر بالدولار:")
 
+@bot.message_handler(commands=["admin"])
+def admin_panel(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("📥 الطلبات المعلقة", callback_data="admin_pending"),
+        types.InlineKeyboardButton("📋 الألعاب", callback_data="admin_games"),
+        types.InlineKeyboardButton("✏️ الرسائل", callback_data="admin_msgs"),
+        types.InlineKeyboardButton("🚫 حظر", callback_data="admin_ban"),
+        types.InlineKeyboardButton("✅ رفع الحظر", callback_data="admin_unban"),
+        types.InlineKeyboardButton("🔴 إيقاف البوت", callback_data="admin_stop"),
+        types.InlineKeyboardButton("🟢 تشغيل البوت", callback_data="admin_start"),
+    )
+    bot.send_message(message.chat.id, "🔧 لوحة التحكم:\nاختر العملية التي ترغب بإدارتها 👇", reply_markup=markup)
+
 @bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "price")
 def handle_price(message):
     user_id = message.from_user.id
