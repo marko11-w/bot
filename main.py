@@ -35,6 +35,56 @@ def is_subscribed(user_id):
         return status in ["member", "administrator", "creator"]
     except:
         return False
+        @bot.message_handler(commands=["start"])
+def start(message):
+    user_id = message.from_user.id
+    if not settings["bot_active"] and user_id != ADMIN_ID:
+        return bot.send_message(user_id, "🚫 البوت متوقف مؤقتًا.")
+    if user_id in banned_users:
+        return bot.send_message(user_id, "🚫 تم حظرك.")
+    if not is_subscribed(user_id):
+        return bot.send_message(user_id, settings["messages"]["must_subscribe"])
+    bot.send_message(user_id, settings["messages"]["start"])
+    bot.send_message(user_id, "📸 أرسل صورة الحساب.")
+    user_states[user_id] = {"step": "photo"}
+
+@bot.message_handler(content_types=["photo"])
+def handle_photo(message):
+    user_id = message.from_user.id
+    if user_states.get(user_id, {}).get("step") != "photo": return
+    user_states[user_id]["photo"] = message.photo[-1].file_id
+    user_states[user_id]["step"] = "desc"
+    bot.send_message(user_id, "📝 اكتب وصف الحساب:")
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "desc")
+def handle_desc(message):
+    user_id = message.from_user.id
+    user_states[user_id]["desc"] = message.text
+    user_states[user_id]["step"] = "game"
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for g in settings["games"]: markup.add(g)
+    bot.send_message(user_id, "🎮 اختر نوع اللعبة:", reply_markup=markup)
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "game")
+def handle_game(message):
+    user_id = message.from_user.id
+    game = message.text
+    if game not in settings["games"]:
+        return bot.send_message(user_id, "❌ اختر لعبة من القائمة.")
+    user_states[user_id]["game"] = game
+    user_states[user_id]["step"] = "price"
+    bot.send_message(user_id, "💰 أدخل السعر بالدولار:")
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "price")
+def handle_price(message):
+    user_id = message.from_user.id
+    try: price = float(message.text)
+    except: return bot.send_message(user_id, "❌ أدخل رقمًا صحيحًا.")
+    user_states[user_id]["price"] = price
+    user_states[user_id]["step"] = "confirm"
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("✅ إرسال الطلب", callback_data="confirm_submit"))
+    bot.send_message(user_id, "هل تريد إرسال الطلب؟", reply_markup=markup)
     @bot.callback_query_handler(func=lambda call: call.data == "confirm_submit")
 def submit_request(call):
     user_id = call.from_user.id
