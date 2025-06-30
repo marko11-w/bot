@@ -121,6 +121,79 @@ def submit_request(call):
     bot.send_message(user_id, "📬 تم إرسال الطلب.")
     user_states.pop(user_id)
 
+@bot.message_handler(commands=["admin"])
+def admin_panel(message):
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_games")
+def edit_games(call):
+    if call.from_user.id != ADMIN_ID:
+        return
+    bot.send_message(call.message.chat.id, "📝 أرسل قائمة الألعاب الجديدة، كل لعبة في سطر.")
+    user_states[call.from_user.id] = {"step": "edit_games"}
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "edit_games")
+def save_games(message):
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_msgs")
+def edit_messages(call):
+    if call.from_user.id != ADMIN_ID:
+        return
+    keys = list(settings["messages"].keys())
+    txt = "✏️ الرسائل القابلة للتعديل:\n"
+    txt += "\n".join([f"- {k}" for k in keys])
+    txt += "\n\n📥 أرسل اسم الرسالة (مثل: start) يليها النص الجديد، مفصول بـ | هكذا:\n\nمثال:\nstart|مرحبًا بك!"
+    user_states[call.from_user.id] = {"step": "edit_message"}
+    bot.send_message(call.message.chat.id, txt)
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("step") == "edit_message")
+def save_message(message):
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_pending")
+def show_pending_requests(call):
+    if call.from_user.id != ADMIN_ID:
+        return
+    if not pending:
+        return bot.send_message(call.message.chat.id, "📭 لا توجد طلبات معلقة.")
+    
+    for user_id, data in pending.items():
+        try:
+            caption = f"🎮 {data['game']}\n📝 {data['desc']}\n💵 {data['price']}$\n👤 @{data.get('username', 'لا يوجد')}\n🆔 {user_id}"
+            markup = types.InlineKeyboardMarkup()
+            markup.row(
+                types.InlineKeyboardButton("✅ قبول", callback_data=f"accept_{user_id}"),
+                types.InlineKeyboardButton("❌ رفض", callback_data=f"reject_{user_id}")
+            )
+            markup.add(types.InlineKeyboardButton("✏️ تعديل", callback_data=f"edit_{user_id}"))
+            bot.send_photo(call.message.chat.id, data["photo"], caption=caption, reply_markup=markup)
+        except Exception as e:
+            print(f"خطأ في عرض طلب {user_id}: {e}")
+    try:
+        key, val = message.text.split("|", 1)
+        key = key.strip()
+        if key not in settings["messages"]:
+            return bot.send_message(message.chat.id, "❌ المفتاح غير موجود.")
+        settings["messages"][key] = val.strip()
+        save_json("settings.json", settings)
+        bot.send_message(message.chat.id, f"✅ تم تحديث رسالة: {key}")
+    except:
+        bot.send_message(message.chat.id, "❌ تنسيق غير صحيح. استخدم المفتاح | الرسالة.")
+    user_states.pop(message.from_user.id)
+    games_list = message.text.strip().split('\n')
+    settings["games"] = games_list
+    save_json("settings.json", settings)
+    bot.send_message(message.chat.id, "✅ تم تحديث قائمة الألعاب.")
+    user_states.pop(message.from_user.id)
+    if message.from_user.id != ADMIN_ID:
+        return
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("📥 الطلبات المعلقة", callback_data="admin_pending"),
+        types.InlineKeyboardButton("📋 الألعاب", callback_data="admin_games"),
+        types.InlineKeyboardButton("✏️ الرسائل", callback_data="admin_msgs"),
+        types.InlineKeyboardButton("🚫 حظر", callback_data="admin_ban"),
+        types.InlineKeyboardButton("✅ رفع الحظر", callback_data="admin_unban"),
+        types.InlineKeyboardButton("🔴 إيقاف البوت", callback_data="admin_stop"),
+        types.InlineKeyboardButton("🟢 تشغيل البوت", callback_data="admin_start"),
+    )
+    bot.send_message(message.chat.id, "🔧 لوحة التحكم:\nاختر العملية التي ترغب بإدارتها 👇", reply_markup=markup)
+
 @app.route("/", methods=["GET"])
 def index():
     return "Bot is running", 200
