@@ -1,147 +1,189 @@
 import os
-import json
 from flask import Flask, request
 import telebot
 from telebot import types
 
-# ✅ توكن البوت (تم إدخاله يدويًا – لا تشاركه علنًا)
 TOKEN = "7837218696:AAGSozPdf3hLT0bBjrgB3uExeuir-90Rvok"
-
-# إعدادات
-ADMIN_ID = 7758666677  # آيدي الأدمن
-CHANNEL_USERNAME = "@MARK01i"
+ADMIN_ID = 7758666677  # غيره إلى الايدي مالك البوت
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-FILES = {
-    "settings": "settings.json",
-    "banned": "banned_users.json",
-    "pending": "pending_requests.json"
-}
+# بيانات الحسابات المعروضة للبيع كمثال
+accounts_for_sale = {}
 
-def load_json(name):
-    try:
-        with open(FILES[name], "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {} if name == "pending" else []
+# قائمة المحظورين (مثال)
+banned_users = set()
 
-def save_json(name, data):
-    with open(FILES[name], "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def admin_only(func):
+    def wrapper(message):
+        if message.from_user.id == ADMIN_ID:
+            return func(message)
+        else:
+            bot.send_message(message.chat.id, "هذه الأوامر مخصصة للإدمن فقط.")
+    return wrapper
 
-# إعداد افتراضي إن لم يكن موجودًا
-if not load_json("settings"):
-    save_json("settings", {
-        "bot_active": True,
-        "games": ["🎮 ببجي", "🔥 فري فاير", "⚽ بيس", "🎯 أخرى"],
-        "messages": {
-            "start": "👋 أهلاً بك في بوت بيع وتبادل الحسابات.\nأرسل صورة الحساب لبدء العملية.",
-            "must_subscribe": f"🚫 يجب الاشتراك في القناة أولًا: {CHANNEL_USERNAME}"
-        }
-    })
-
-@app.route("/", methods=["GET", "POST"])
-def webhook():
-    if request.method == "POST":
-        update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
-        bot.process_new_updates([update])
-        return "ok"
-    return "Bot is running."
+# لوحة التحكم - أزرار رئيسية
+def main_menu():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("بيع حساب", callback_data="sell_account"),
+        types.InlineKeyboardButton("تعديل الوصف", callback_data="edit_description"),
+        types.InlineKeyboardButton("تعديل السعر", callback_data="edit_price"),
+        types.InlineKeyboardButton("تعديل الصورة", callback_data="edit_image"),
+        types.InlineKeyboardButton("إيقاف البوت", callback_data="stop_bot"),
+        types.InlineKeyboardButton("حظر مستخدم", callback_data="ban_user")
+    )
+    return markup
 
 @bot.message_handler(commands=["start"])
 def start(message):
-    if load_json("settings").get("bot_active", True) is False:
-        return bot.reply_to(message, "🔒 البوت متوقف حالياً.")
-    
-    if str(message.from_user.id) in load_json("banned"):
-        return bot.reply_to(message, "🚫 تم حظرك من استخدام هذا البوت.")
-    
-    bot.send_message(message.chat.id, load_json("settings")["messages"]["start"])
-    bot.send_message(message.chat.id, "📸 أرسل صورة الحساب للبيع أو التبادل.")
-    bot.register_next_step_handler(message, receive_image)
+    bot.send_message(message.chat.id, "مرحباً! اختر خياراً من القائمة:", reply_markup=main_menu())
 
-def receive_image(message):
-    if not message.photo:
-        return bot.reply_to(message, "📸 الرجاء إرسال صورة فقط.")
-    
-    user_id = str(message.from_user.id)
-    pending = load_json("pending")
-    pending[user_id] = {"photo": message.photo[-1].file_id}
-    save_json("pending", pending)
-    
-    bot.send_message(message.chat.id, "📝 أرسل وصف الحساب:")
-    bot.register_next_step_handler(message, receive_description)
-
-def receive_description(message):
-    user_id = str(message.from_user.id)
-    pending = load_json("pending")
-    if user_id not in pending:
+# التعامل مع ضغط الأزرار
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    user_id = call.from_user.id
+    if user_id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "هذه الأوامر للإدمن فقط.")
         return
     
-    pending[user_id]["description"] = message.text
-    save_json("pending", pending)
+    if call.data == "sell_account":
+        bot.answer_callback_query(call.id, "أرسل صورة الحساب مع وصف وسعر.")
+        msg = bot.send_message(call.message.chat.id, "أرسل صورة الحساب مع الوصف (نص مع الصورة).")
+        bot.register_next_step_handler(msg, receive_account_info)
     
-    games = load_json("settings")["games"]
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    for g in games:
-        markup.add(g)
-    bot.send_message(message.chat.id, "🎮 اختر نوع اللعبة:", reply_markup=markup)
-    bot.register_next_step_handler(message, receive_game)
-
-def receive_game(message):
-    user_id = str(message.from_user.id)
-    pending = load_json("pending")
-    pending[user_id]["game"] = message.text
-    save_json("pending", pending)
+    elif call.data == "edit_description":
+        bot.answer_callback_query(call.id, "أرسل رقم الحساب لتعديل الوصف.")
+        msg = bot.send_message(call.message.chat.id, "أرسل رقم الحساب:")
+        bot.register_next_step_handler(msg, edit_description_step)
+        
+    elif call.data == "edit_price":
+        bot.answer_callback_query(call.id, "أرسل رقم الحساب لتعديل السعر.")
+        msg = bot.send_message(call.message.chat.id, "أرسل رقم الحساب:")
+        bot.register_next_step_handler(msg, edit_price_step)
     
-    bot.send_message(message.chat.id, "💵 كم سعر الحساب؟", reply_markup=types.ReplyKeyboardRemove())
-    bot.register_next_step_handler(message, receive_price)
-
-def receive_price(message):
-    user_id = str(message.from_user.id)
-    try:
-        float(message.text)
-        price = f"${message.text}"
-    except:
-        return bot.reply_to(message, "❌ يرجى إدخال رقم فقط.")
+    elif call.data == "edit_image":
+        bot.answer_callback_query(call.id, "أرسل رقم الحساب لتعديل الصورة.")
+        msg = bot.send_message(call.message.chat.id, "أرسل رقم الحساب:")
+        bot.register_next_step_handler(msg, edit_image_step)
     
-    pending = load_json("pending")
-    pending[user_id]["price"] = price
-    save_json("pending", pending)
-
-    bot.send_message(message.chat.id, "✅ تم استلام الطلب، وسيتم مراجعته من قبل الإدارة.")
+    elif call.data == "stop_bot":
+        bot.answer_callback_query(call.id, "تم إيقاف البوت مؤقتاً.")
+        # يمكنك وضع منطق الإيقاف أو رد معين هنا
+        bot.send_message(call.message.chat.id, "البوت متوقف حالياً (وظيفة غير مفعلة).")
     
-    data = pending[user_id]
-    caption = f"📌 طلب جديد من: @{message.from_user.username or 'غير معروف'}\n\n" \
-              f"🎮 اللعبة: {data['game']}\n💬 الوصف: {data['description']}\n💵 السعر: {data['price']}\n🆔 ID: {user_id}"
+    elif call.data == "ban_user":
+        bot.answer_callback_query(call.id, "أرسل ايدي المستخدم للحظر.")
+        msg = bot.send_message(call.message.chat.id, "أرسل ايدي المستخدم:")
+        bot.register_next_step_handler(msg, ban_user_step)
 
-    keyboard = types.InlineKeyboardMarkup()
-    keyboard.add(
-        types.InlineKeyboardButton("✅ قبول", callback_data=f"accept_{user_id}"),
-        types.InlineKeyboardButton("❌ رفض", callback_data=f"reject_{user_id}")
-    )
-    bot.send_photo(ADMIN_ID, data["photo"], caption=caption, reply_markup=keyboard)
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("accept_") or c.data.startswith("reject_"))
-def handle_decision(call):
-    action, user_id = call.data.split("_")
-    pending = load_json("pending")
-    if user_id not in pending:
-        return bot.answer_callback_query(call.id, "❌ الطلب غير موجود.")
-    
-    data = pending[user_id]
-    if action == "accept":
-        caption = f"🎮 {data['game']}\n💬 {data['description']}\n💵 السعر: {data['price']}\n👤 للتواصل: @{user_id}"
-        bot.send_photo(CHANNEL_USERNAME, data["photo"], caption=caption)
-        bot.send_message(user_id, "✅ تم قبول طلبك ونشره في القناة.")
+# استلام بيانات الحساب للبيع
+def receive_account_info(message):
+    if message.photo:
+        caption = message.caption if message.caption else ""
+        accounts_for_sale[message.message_id] = {
+            "photo_file_id": message.photo[-1].file_id,
+            "description": caption,
+            "price": None
+        }
+        bot.send_message(message.chat.id, "تم استلام الصورة والوصف. الآن أرسل السعر (بالأرقام فقط).")
+        bot.register_next_step_handler(message, receive_price_step, message.message_id)
     else:
-        bot.send_message(user_id, "❌ تم رفض طلبك من قبل الإدارة.")
-    
-    del pending[user_id]
-    save_json("pending", pending)
-    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        bot.send_message(message.chat.id, "الرجاء إرسال صورة مع الوصف.")
+        return
+
+def receive_price_step(message, msg_id):
+    try:
+        price = float(message.text)
+        accounts_for_sale[msg_id]["price"] = price
+        bot.send_message(message.chat.id, f"تم إضافة الحساب للسوق:\nالوصف: {accounts_for_sale[msg_id]['description']}\nالسعر: {price} $")
+        # هنا يمكنك نشر الحساب في القناة أو حفظه في قاعدة بيانات
+    except:
+        bot.send_message(message.chat.id, "الرجاء إدخال سعر صحيح بالأرقام فقط.")
+        bot.register_next_step_handler(message, receive_price_step, msg_id)
+
+# تعديل الوصف
+def edit_description_step(message):
+    try:
+        msg_id = int(message.text)
+        if msg_id in accounts_for_sale:
+            msg = bot.send_message(message.chat.id, "أرسل الوصف الجديد:")
+            bot.register_next_step_handler(msg, save_new_description, msg_id)
+        else:
+            bot.send_message(message.chat.id, "رقم الحساب غير موجود.")
+    except:
+        bot.send_message(message.chat.id, "الرجاء إدخال رقم صحيح.")
+
+def save_new_description(message, msg_id):
+    accounts_for_sale[msg_id]["description"] = message.text
+    bot.send_message(message.chat.id, "تم تعديل الوصف بنجاح.")
+
+# تعديل السعر
+def edit_price_step(message):
+    try:
+        msg_id = int(message.text)
+        if msg_id in accounts_for_sale:
+            msg = bot.send_message(message.chat.id, "أرسل السعر الجديد (بالأرقام فقط):")
+            bot.register_next_step_handler(msg, save_new_price, msg_id)
+        else:
+            bot.send_message(message.chat.id, "رقم الحساب غير موجود.")
+    except:
+        bot.send_message(message.chat.id, "الرجاء إدخال رقم صحيح.")
+
+def save_new_price(message, msg_id):
+    try:
+        price = float(message.text)
+        accounts_for_sale[msg_id]["price"] = price
+        bot.send_message(message.chat.id, "تم تعديل السعر بنجاح.")
+    except:
+        bot.send_message(message.chat.id, "الرجاء إدخال سعر صحيح.")
+
+# تعديل الصورة
+def edit_image_step(message):
+    try:
+        msg_id = int(message.text)
+        if msg_id in accounts_for_sale:
+            msg = bot.send_message(message.chat.id, "أرسل الصورة الجديدة:")
+            bot.register_next_step_handler(msg, save_new_image, msg_id)
+        else:
+            bot.send_message(message.chat.id, "رقم الحساب غير موجود.")
+    except:
+        bot.send_message(message.chat.id, "الرجاء إدخال رقم صحيح.")
+
+def save_new_image(message, msg_id):
+    if message.photo:
+        accounts_for_sale[msg_id]["photo_file_id"] = message.photo[-1].file_id
+        bot.send_message(message.chat.id, "تم تعديل الصورة بنجاح.")
+    else:
+        bot.send_message(message.chat.id, "الرجاء إرسال صورة فقط.")
+
+# حظر مستخدم
+def ban_user_step(message):
+    try:
+        user_id = int(message.text)
+        banned_users.add(user_id)
+        bot.send_message(message.chat.id, f"تم حظر المستخدم {user_id}.")
+    except:
+        bot.send_message(message.chat.id, "الرجاء إدخال ايدي صحيح.")
+
+# مثال: منع المستخدمين المحظورين من استخدام البوت
+@bot.message_handler(func=lambda m: m.from_user.id in banned_users)
+def banned_message(message):
+    bot.send_message(message.chat.id, "أنت محظور من استخدام البوت.")
+
+# ويب هوك لاستقبال التحديثات من Telegram
+@app.route("/", methods=["POST"])
+def webhook():
+    json_string = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(json_string)
+    bot.process_new_updates([update])
+    return "", 200
 
 if __name__ == "__main__":
+    # احذف الويب هوك القديم
+    bot.remove_webhook()
+    # اضبط الويب هوك مع رابطك (غير الرابط أدناه إلى رابطك الحقيقي)
+    WEBHOOK_URL = "https://bot-production-7bab.up.railway.app/"
+    bot.set_webhook(url=WEBHOOK_URL)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
