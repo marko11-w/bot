@@ -1,178 +1,62 @@
 import os
-from flask import Flask, request
 import telebot
-from telebot import types
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from flask import Flask, request
+import os  # لاستدعاء متغيرات البيئة مثل PORT و WEBHOOK_URL
 
 TOKEN = "7837218696:AAGSozPdf3hLT0bBjrgB3uExeuir-90Rvok"
-ADMIN_ID = 7758666677  # غيره إلى الايدي مالك البوت
+ADMIN_ID = 7758666677  # استبدل بـ ID الخاص بك
+CHANNEL_USERNAME = "@MARK01i"  # رابط القناة الخاصة بك
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# بيانات الحسابات المعروضة للبيع كمثال
-accounts_for_sale = {}
-
-# قائمة المحظورين (مثال)
-banned_users = set()
-
-def admin_only(func):
-    def wrapper(message):
-        if message.from_user.id == ADMIN_ID:
-            return func(message)
-        else:
-            bot.send_message(message.chat.id, "هذه الأوامر مخصصة للإدمن فقط.")
-    return wrapper
-
-# لوحة التحكم - أزرار رئيسية
+# --- لوحة أزرار الادمن ---
 def main_menu():
-    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("بيع حساب", callback_data="sell_account"),
-        types.InlineKeyboardButton("تعديل الوصف", callback_data="edit_description"),
-        types.InlineKeyboardButton("تعديل السعر", callback_data="edit_price"),
-        types.InlineKeyboardButton("تعديل الصورة", callback_data="edit_image"),
-        types.InlineKeyboardButton("إيقاف البوت", callback_data="stop_bot"),
-        types.InlineKeyboardButton("حظر مستخدم", callback_data="ban_user")
+        InlineKeyboardButton("تعديل الوصف", callback_data="edit_description"),
+        InlineKeyboardButton("تعديل السعر", callback_data="edit_price"),
+        InlineKeyboardButton("تعديل الصورة", callback_data="edit_image"),
+        InlineKeyboardButton("حظر شخص", callback_data="ban_user"),
+        InlineKeyboardButton("إيقاف البوت", callback_data="stop_bot")
     )
     return markup
 
+# --- بداية البوت ---
 @bot.message_handler(commands=["start"])
 def start(message):
-    bot.send_message(message.chat.id, "مرحباً! اختر خياراً من القائمة:", reply_markup=main_menu())
+    if message.from_user.id == ADMIN_ID:
+        bot.send_message(message.chat.id, "مرحباً أيها الإدمن! اختر خياراً من القائمة:", reply_markup=main_menu())
+    else:
+        bot.send_message(message.chat.id, "مرحباً! هذا البوت خاص بالإدارة فقط.")
 
-# التعامل مع ضغط الأزرار
+# --- التعامل مع أزرار الادمن ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
-    user_id = call.from_user.id
-    if user_id != ADMIN_ID:
-        bot.answer_callback_query(call.id, "هذه الأوامر للإدمن فقط.")
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "أنت غير مخوّل لاستخدام هذه الأزرار.")
         return
-    
-    if call.data == "sell_account":
-        bot.answer_callback_query(call.id, "أرسل صورة الحساب مع وصف وسعر.")
-        msg = bot.send_message(call.message.chat.id, "أرسل صورة الحساب مع الوصف (نص مع الصورة).")
-        bot.register_next_step_handler(msg, receive_account_info)
-    
-    elif call.data == "edit_description":
-        bot.answer_callback_query(call.id, "أرسل رقم الحساب لتعديل الوصف.")
-        msg = bot.send_message(call.message.chat.id, "أرسل رقم الحساب:")
-        bot.register_next_step_handler(msg, edit_description_step)
-        
+
+    if call.data == "edit_description":
+        bot.answer_callback_query(call.id, "أرسل لي الوصف الجديد:")
+        # هنا تضيف منطق استقبال الوصف الجديد (مثلاً انتظار رسالة الإدمن)
     elif call.data == "edit_price":
-        bot.answer_callback_query(call.id, "أرسل رقم الحساب لتعديل السعر.")
-        msg = bot.send_message(call.message.chat.id, "أرسل رقم الحساب:")
-        bot.register_next_step_handler(msg, edit_price_step)
-    
+        bot.answer_callback_query(call.id, "أرسل لي السعر الجديد:")
+        # منطق استقبال السعر الجديد
     elif call.data == "edit_image":
-        bot.answer_callback_query(call.id, "أرسل رقم الحساب لتعديل الصورة.")
-        msg = bot.send_message(call.message.chat.id, "أرسل رقم الحساب:")
-        bot.register_next_step_handler(msg, edit_image_step)
-    
-    elif call.data == "stop_bot":
-        bot.answer_callback_query(call.id, "تم إيقاف البوت مؤقتاً.")
-        # يمكنك وضع منطق الإيقاف أو رد معين هنا
-        bot.send_message(call.message.chat.id, "البوت متوقف حالياً (وظيفة غير مفعلة).")
-    
+        bot.answer_callback_query(call.id, "أرسل لي الصورة الجديدة:")
+        # منطق استقبال الصورة الجديدة
     elif call.data == "ban_user":
-        bot.answer_callback_query(call.id, "أرسل ايدي المستخدم للحظر.")
-        msg = bot.send_message(call.message.chat.id, "أرسل ايدي المستخدم:")
-        bot.register_next_step_handler(msg, ban_user_step)
-
-# استلام بيانات الحساب للبيع
-def receive_account_info(message):
-    if message.photo:
-        caption = message.caption if message.caption else ""
-        accounts_for_sale[message.message_id] = {
-            "photo_file_id": message.photo[-1].file_id,
-            "description": caption,
-            "price": None
-        }
-        bot.send_message(message.chat.id, "تم استلام الصورة والوصف. الآن أرسل السعر (بالأرقام فقط).")
-        bot.register_next_step_handler(message, receive_price_step, message.message_id)
+        bot.answer_callback_query(call.id, "أرسل لي معرف المستخدم لحظره:")
+        # منطق الحظر
+    elif call.data == "stop_bot":
+        bot.answer_callback_query(call.id, "تم إيقاف البوت.")
+        # منطق إيقاف البوت
     else:
-        bot.send_message(message.chat.id, "الرجاء إرسال صورة مع الوصف.")
-        return
+        bot.answer_callback_query(call.id, "خيار غير معروف.")
 
-def receive_price_step(message, msg_id):
-    try:
-        price = float(message.text)
-        accounts_for_sale[msg_id]["price"] = price
-        bot.send_message(message.chat.id, f"تم إضافة الحساب للسوق:\nالوصف: {accounts_for_sale[msg_id]['description']}\nالسعر: {price} $")
-        # هنا يمكنك نشر الحساب في القناة أو حفظه في قاعدة بيانات
-    except:
-        bot.send_message(message.chat.id, "الرجاء إدخال سعر صحيح بالأرقام فقط.")
-        bot.register_next_step_handler(message, receive_price_step, msg_id)
-
-# تعديل الوصف
-def edit_description_step(message):
-    try:
-        msg_id = int(message.text)
-        if msg_id in accounts_for_sale:
-            msg = bot.send_message(message.chat.id, "أرسل الوصف الجديد:")
-            bot.register_next_step_handler(msg, save_new_description, msg_id)
-        else:
-            bot.send_message(message.chat.id, "رقم الحساب غير موجود.")
-    except:
-        bot.send_message(message.chat.id, "الرجاء إدخال رقم صحيح.")
-
-def save_new_description(message, msg_id):
-    accounts_for_sale[msg_id]["description"] = message.text
-    bot.send_message(message.chat.id, "تم تعديل الوصف بنجاح.")
-
-# تعديل السعر
-def edit_price_step(message):
-    try:
-        msg_id = int(message.text)
-        if msg_id in accounts_for_sale:
-            msg = bot.send_message(message.chat.id, "أرسل السعر الجديد (بالأرقام فقط):")
-            bot.register_next_step_handler(msg, save_new_price, msg_id)
-        else:
-            bot.send_message(message.chat.id, "رقم الحساب غير موجود.")
-    except:
-        bot.send_message(message.chat.id, "الرجاء إدخال رقم صحيح.")
-
-def save_new_price(message, msg_id):
-    try:
-        price = float(message.text)
-        accounts_for_sale[msg_id]["price"] = price
-        bot.send_message(message.chat.id, "تم تعديل السعر بنجاح.")
-    except:
-        bot.send_message(message.chat.id, "الرجاء إدخال سعر صحيح.")
-
-# تعديل الصورة
-def edit_image_step(message):
-    try:
-        msg_id = int(message.text)
-        if msg_id in accounts_for_sale:
-            msg = bot.send_message(message.chat.id, "أرسل الصورة الجديدة:")
-            bot.register_next_step_handler(msg, save_new_image, msg_id)
-        else:
-            bot.send_message(message.chat.id, "رقم الحساب غير موجود.")
-    except:
-        bot.send_message(message.chat.id, "الرجاء إدخال رقم صحيح.")
-
-def save_new_image(message, msg_id):
-    if message.photo:
-        accounts_for_sale[msg_id]["photo_file_id"] = message.photo[-1].file_id
-        bot.send_message(message.chat.id, "تم تعديل الصورة بنجاح.")
-    else:
-        bot.send_message(message.chat.id, "الرجاء إرسال صورة فقط.")
-
-# حظر مستخدم
-def ban_user_step(message):
-    try:
-        user_id = int(message.text)
-        banned_users.add(user_id)
-        bot.send_message(message.chat.id, f"تم حظر المستخدم {user_id}.")
-    except:
-        bot.send_message(message.chat.id, "الرجاء إدخال ايدي صحيح.")
-
-# مثال: منع المستخدمين المحظورين من استخدام البوت
-@bot.message_handler(func=lambda m: m.from_user.id in banned_users)
-def banned_message(message):
-    bot.send_message(message.chat.id, "أنت محظور من استخدام البوت.")
-
-# ويب هوك لاستقبال التحديثات من Telegram
+# --- استقبال تحديثات الويب هوك ---
 @app.route("/", methods=["POST"])
 def webhook():
     json_string = request.get_data().decode("utf-8")
@@ -180,10 +64,15 @@ def webhook():
     bot.process_new_updates([update])
     return "", 200
 
+# --- ضبط الويب هوك ---
+def set_webhook():
+    url = os.environ.get("WEBHOOK_URL")  # مثال: https://bot-production-7bab.up.railway.app/
+    if url:
+        bot.remove_webhook()
+        bot.set_webhook(url=url)
+    else:
+        print("لم يتم تحديد WEBHOOK_URL في المتغيرات البيئية")
+
 if __name__ == "__main__":
-    # احذف الويب هوك القديم
-    bot.remove_webhook()
-    # اضبط الويب هوك مع رابطك (غير الرابط أدناه إلى رابطك الحقيقي)
-    WEBHOOK_URL = "https://bot-production-7bab.up.railway.app/"
-    bot.set_webhook(url=WEBHOOK_URL)
+    set_webhook()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
